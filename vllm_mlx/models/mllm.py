@@ -708,6 +708,7 @@ class MLXMultimodalLM:
         self.processor = None
         self.config = None
         self._loaded = False
+        self._video_native = False
 
         # Initialize MLLM prefix cache manager (with vision embedding caching)
         self._cache_manager: MLLMPrefixCacheManager | None = None
@@ -808,7 +809,14 @@ class MLXMultimodalLM:
         """
         import mlx.core as mx
         from mlx_vlm import generate
-        from mlx_vlm.video_generate import process_vision_info
+
+        try:
+            from mlx_vlm.video_generate import process_vision_info
+        except ImportError:
+            raise ImportError(
+                "mlx_vlm.video_generate is required for native video support. "
+                "Upgrade with: pip install --upgrade mlx-vlm"
+            )
 
         # Translate OpenAI API messages into process_vision_info format
         native_messages = self._translate_messages_for_native_video(
@@ -945,6 +953,9 @@ class MLXMultimodalLM:
                             continue
                     else:
                         video_source = item.get("video", item.get("url", ""))
+
+                    if not video_source:
+                        continue
 
                     # Resolve to local path
                     video_path = process_video_input(video_source)
@@ -1690,6 +1701,8 @@ class MLXMultimodalLM:
                             _msg_video_inputs.setdefault(msg_idx, []).append(url)
 
         # Use native video pipeline for supported models
+        # NOTE: native video uses a blocking generate() call, so this yields
+        # a single chunk rather than streaming incrementally.
         if self._video_native and _msg_video_inputs:
             output = self._generate_native_video(
                 messages=messages,
