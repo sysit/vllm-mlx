@@ -71,8 +71,6 @@ def load_model_with_fallback(model_name: str, tokenizer_config: dict = None):
 
 def _load_strict_false(model_name: str, tokenizer_config: dict = None):
     """Load model with strict=False to discard extra weights (e.g., vision tower)."""
-    from pathlib import Path
-
     from mlx_lm.utils import load_model, load_tokenizer
 
     local_path = Path(model_name)
@@ -83,8 +81,12 @@ def _load_strict_false(model_name: str, tokenizer_config: dict = None):
 
         model_path = Path(snapshot_download(model_name))
 
-    model, _ = load_model(model_path, strict=False)
-    tokenizer = load_tokenizer(model_path, tokenizer_config or {})
+    model, config = load_model(model_path, strict=False)
+    tokenizer = load_tokenizer(
+        model_path,
+        tokenizer_config or {},
+        eos_token_ids=config.get("eos_token_id", None),
+    )
     return model, tokenizer
 
 
