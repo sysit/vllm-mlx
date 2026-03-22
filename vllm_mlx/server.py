@@ -104,13 +104,21 @@ from .api.utils import (
 )
 from .engine import BaseEngine, BatchedEngine, GenerationOutput, SimpleEngine
 from .tool_parsers import ToolParserManager
+from .multi_model_manager import (
+    DynamicModelManager,
+    get_model_manager,
+    init_model_manager,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Global engine instance
+# Global engine instance (for single-model mode)
 _engine: BaseEngine | None = None
 _model_name: str | None = None
+
+# Multi-model manager (for multi-model mode)
+_multi_model_enabled: bool = False
 _default_max_tokens: int = 32768
 _default_timeout: float = 300.0  # Default request timeout in seconds (5 minutes)
 _default_temperature: float | None = None  # Set via --default-temperature
@@ -207,13 +215,21 @@ async def lifespan(app: FastAPI):
     """FastAPI lifespan for startup/shutdown events."""
     global _engine, _mcp_manager
 
-    # Startup: Start engine if loaded (needed for BatchedEngine in uvicorn's event loop)
-    if _engine is not None and hasattr(_engine, "_loaded") and not _engine._loaded:
-        await _engine.start()
+    # Startup: Multi-model mode
+    if _multi_model_enabled:
+        manager = get_model_manager()
+        if manager is not None:
+            # Start background cleanup task for expired models
+            await manager.start_cleanup_task()
+            logger.info("Model manager started (Ollama-style on-demand loading)")
+    else:
+        # Single-model mode: Start engine if loaded
+        if _engine is not None and hasattr(_engine, "_loaded") and not _engine._loaded:
+            await _engine.start()
 
-    # Load persisted cache from disk (AFTER engine start — AsyncEngineCore must exist)
-    if _engine is not None and hasattr(_engine, "load_cache_from_disk"):
-        _load_prefix_cache_from_disk()
+        # Load persisted cache from disk (AFTER engine start — AsyncEngineCore must exist)
+        if _engine is not None and hasattr(_engine, "load_cache_from_disk"):
+            _load_prefix_cache_from_disk()
 
     # Initialize MCP if config provided
     mcp_config = os.environ.get("VLLM_MLX_MCP_CONFIG")
@@ -222,17 +238,26 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown: Save cache to disk BEFORE stopping engine
-    if _engine is not None and hasattr(_engine, "save_cache_to_disk"):
-        _save_prefix_cache_to_disk()
+    # Shutdown: Multi-model mode
+    if _multi_model_enabled:
+        manager = get_model_manager()
+        if manager is not None:
+            await manager.stop_all()
+            logger.info("All models stopped")
+    else:
+        # Single-model mode: Save cache to disk BEFORE stopping engine
+        if _engine is not None and hasattr(_engine, "save_cache_to_disk"):
+            _save_prefix_cache_to_disk()
 
-    # Shutdown: Close MCP connections and stop engine
+        # Stop single engine
+        if _engine is not None:
+            await _engine.stop()
+            logger.info("Engine stopped")
+
+    # Shutdown: Close MCP connections
     if _mcp_manager is not None:
         await _mcp_manager.stop()
         logger.info("MCP manager stopped")
-    if _engine is not None:
-        await _engine.stop()
-        logger.info("Engine stopped")
 
 
 app = FastAPI(
@@ -328,8 +353,66 @@ async def verify_api_key(credentials: HTTPAuthorizationCredentials = Depends(sec
     return True
 
 
-def get_engine() -> BaseEngine:
-    """Get the loaded engine, raising error if not loaded."""
+def get_engine(model_name: str | None = None) -> BaseEngine:
+    """
+    Get the loaded engine for a model.
+    
+    In single-model mode, returns the global engine.
+    In multi-model mode, returns the engine for the specified model
+    (loading it on-demand if necessary).
+    
+    Args:
+        model_name: Model name or alias (None for default model)
+        
+    Returns:
+        Engine instance
+        
+    Raises:
+        HTTPException: If model not found or not loaded
+    """
+    # Multi-model mode
+    if _multi_model_enabled:
+        manager = get_model_manager()
+        if manager is None:
+            raise HTTPException(status_code=503, detail="Model manager not initialized")
+        try:
+            import asyncio
+            loop = asyncio.get_running_loop()
+            return loop.run_until_complete(manager.get_engine(model_name))
+        except RuntimeError:
+            # No running loop, create one
+            return asyncio.get_event_loop().run_until_complete(
+                manager.get_engine(model_name)
+            )
+    
+    # Single-model mode (original behavior)
+    if _engine is None:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+    return _engine
+
+
+async def get_engine_async(
+    model_name: str | None = None,
+    keep_alive: float | None = None,
+) -> BaseEngine:
+    """
+    Async version of get_engine for use in async context.
+    
+    Args:
+        model_name: Model name or alias (None for default model)
+        keep_alive: Override keep_alive for this request (Ollama-style)
+        
+    Returns:
+        Engine instance
+    """
+    # Multi-model mode
+    if _multi_model_enabled:
+        manager = get_model_manager()
+        if manager is None:
+            raise HTTPException(status_code=503, detail="Model manager not initialized")
+        return await manager.get_engine(model_name, keep_alive=keep_alive)
+    
+    # Single-model mode
     if _engine is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
     return _engine
@@ -467,6 +550,7 @@ def load_model(
     stream_interval: int = 1,
     max_tokens: int = 32768,
     force_mllm: bool = False,
+    display_name: str | None = None,
 ):
     """
     Load a model (auto-detects MLLM vs LLM).
@@ -478,11 +562,12 @@ def load_model(
         stream_interval: Tokens to batch before streaming (batched mode only)
         max_tokens: Default max tokens for generation
         force_mllm: Force loading as MLLM even if not auto-detected
+        display_name: Custom display name for the model (used in /v1/models)
     """
     global _engine, _model_name, _default_max_tokens, _tool_parser_instance
 
     _default_max_tokens = max_tokens
-    _model_name = model_name
+    _model_name = display_name if display_name else model_name
     # Reset tool parser instance when model is reloaded (tokenizer may change)
     _tool_parser_instance = None
 
@@ -550,10 +635,34 @@ async def health():
             "tools_available": len(_mcp_manager.get_all_tools()),
         }
 
+    # Multi-model mode
+    if _multi_model_enabled:
+        manager = get_model_manager()
+        if manager is None:
+            return {
+                "status": "error",
+                "error": "Model manager not initialized",
+                "mcp": mcp_info,
+            }
+        stats = manager.get_stats()
+        return {
+            "status": "healthy",
+            "mode": "multi_model",
+            "registered_models": stats.get("registered_models", 0),
+            "loaded_models": stats.get("loaded_models", 0),
+            "total_memory_gb": stats.get("total_memory_gb", 0),
+            "max_memory_gb": stats.get("max_memory_gb"),
+            "default_model": stats.get("default_model"),
+            "keep_alive_seconds": stats.get("keep_alive_seconds", 300),
+            "mcp": mcp_info,
+        }
+
+    # Single-model mode
     engine_stats = _engine.get_stats() if _engine else {}
 
     return {
         "status": "healthy",
+        "mode": "single_model",
         "model_loaded": _engine is not None,
         "model_name": _model_name,
         "model_type": "mllm" if (_engine and _engine.is_mllm) else "llm",
@@ -565,6 +674,30 @@ async def health():
 @app.get("/v1/status")
 async def status():
     """Real-time status with per-request details for debugging and monitoring."""
+    # Multi-model mode
+    if _multi_model_enabled:
+        manager = get_model_manager()
+        if manager is None:
+            return {"status": "error", "error": "Model manager not initialized"}
+        
+        stats = manager.get_stats()
+        return {
+            "status": "running",
+            "mode": "multi_model",
+            "registered_models": stats.get("registered_models", 0),
+            "loaded_models": stats.get("loaded_models", 0),
+            "total_memory_gb": stats.get("total_memory_gb", 0),
+            "max_memory_gb": stats.get("max_memory_gb"),
+            "default_model": stats.get("default_model"),
+            "keep_alive_seconds": stats.get("keep_alive_seconds", 300),
+            "models": manager.list_loaded_models(),
+            "metal": {
+                "active_memory_gb": stats.get("metal_active_memory_gb"),
+                "peak_memory_gb": stats.get("metal_peak_memory_gb"),
+            },
+        }
+
+    # Single-model mode
     if _engine is None:
         return {"status": "not_loaded", "model": None, "requests": []}
 
@@ -572,6 +705,7 @@ async def status():
 
     return {
         "status": "running" if stats.get("running") else "stopped",
+        "mode": "single_model",
         "model": _model_name,
         "uptime_s": round(stats.get("uptime_seconds", 0), 1),
         "steps_executed": stats.get("steps_executed", 0),
@@ -633,10 +767,105 @@ async def clear_cache():
 @app.get("/v1/models", dependencies=[Depends(verify_api_key)])
 async def list_models() -> ModelsResponse:
     """List available models."""
+    # Multi-model mode
+    if _multi_model_enabled:
+        manager = get_model_manager()
+        if manager is not None:
+            models_data = manager.list_models()
+            models = [
+                ModelInfo(
+                    id=m.get("name", m.get("id", "unknown")),
+                    object=m.get("object", "model"),
+                    owned_by=m.get("owned_by", "system"),
+                )
+                for m in models_data
+            ]
+            return ModelsResponse(data=models)
+    
+    # Single-model mode (original behavior)
     models = []
     if _model_name:
         models.append(ModelInfo(id=_model_name))
     return ModelsResponse(data=models)
+
+
+@app.get("/v1/models/loaded", dependencies=[Depends(verify_api_key)])
+async def list_loaded_models():
+    """
+    List currently loaded models with their status.
+    
+    Only available in multi-model mode.
+    """
+    if not _multi_model_enabled:
+        raise HTTPException(
+            status_code=400,
+            detail="This endpoint is only available in multi-model mode. "
+                   "Start server with --config to enable multi-model support."
+        )
+    
+    manager = get_model_manager()
+    if manager is None:
+        return {"models": [], "stats": {}}
+    
+    return {
+        "models": manager.list_loaded_models(),
+        "stats": manager.get_stats(),
+    }
+
+
+@app.post("/v1/models/{model_name}/load", dependencies=[Depends(verify_api_key)])
+async def load_model_endpoint(model_name: str):
+    """
+    Explicitly load a model.
+    
+    In multi-model mode, loads the specified model into memory.
+    Useful for pre-warming models before use.
+    """
+    if not _multi_model_enabled:
+        raise HTTPException(
+            status_code=400,
+            detail="This endpoint is only available in multi-model mode."
+        )
+    
+    manager = get_model_manager()
+    if manager is None:
+        raise HTTPException(status_code=503, detail="Model manager not initialized")
+    
+    try:
+        engine = await manager.get_engine(model_name)
+        return {
+            "status": "loaded",
+            "model": model_name,
+            "is_mllm": engine.is_mllm,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load model: {e}")
+
+
+@app.post("/v1/models/{model_name}/unload", dependencies=[Depends(verify_api_key)])
+async def unload_model_endpoint(model_name: str):
+    """
+    Unload a model from memory.
+    
+    In multi-model mode, unloads the specified model to free memory.
+    """
+    if not _multi_model_enabled:
+        raise HTTPException(
+            status_code=400,
+            detail="This endpoint is only available in multi-model mode."
+        )
+    
+    manager = get_model_manager()
+    if manager is None:
+        raise HTTPException(status_code=503, detail="Model manager not initialized")
+    
+    unloaded = await manager.unload_model(model_name)
+    if unloaded:
+        return {"status": "unloaded", "model": model_name}
+    else:
+        return {"status": "not_loaded", "model": model_name}
 
 
 # =============================================================================
@@ -1167,7 +1396,11 @@ async def _wait_with_disconnect(
 )
 async def create_completion(request: CompletionRequest, raw_request: Request):
     """Create a text completion."""
-    engine = get_engine()
+    # In multi-model mode, get engine for requested model
+    if _multi_model_enabled:
+        engine = await get_engine_async(request.model, keep_alive=request.keep_alive)
+    else:
+        engine = get_engine()
 
     # Handle single prompt or list of prompts
     prompts = request.prompt if isinstance(request.prompt, list) else [request.prompt]
@@ -1287,7 +1520,11 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
     }
     ```
     """
-    engine = get_engine()
+    # In multi-model mode, get engine for requested model
+    if _multi_model_enabled:
+        engine = await get_engine_async(request.model, keep_alive=request.keep_alive)
+    else:
+        engine = get_engine()
 
     # --- Detailed request logging ---
     n_msgs = len(request.messages)
@@ -2142,6 +2379,12 @@ Examples:
         help="Model to load (HuggingFace model name or local path)",
     )
     parser.add_argument(
+        "--model-name",
+        type=str,
+        default=None,
+        help="Custom display name for the model (shown in /v1/models, default: use model path)",
+    )
+    parser.add_argument(
         "--host",
         type=str,
         default="0.0.0.0",
@@ -2282,6 +2525,7 @@ Examples:
         use_batching=args.continuous_batching,
         max_tokens=args.max_tokens,
         force_mllm=args.mllm,
+        display_name=args.model_name,
     )
 
     # Start server

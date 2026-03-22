@@ -28,8 +28,88 @@ def serve_command(args):
     from . import server
     from .scheduler import SchedulerConfig
     from .server import RateLimiter, app, load_model
+    from .multi_model_manager import init_model_manager, get_model_manager
 
     logger = logging.getLogger(__name__)
+
+    # Determine mode: multi-model vs single-model
+    # Multi-model if: --models-dir OR multiple --model args OR explicit --multi-model
+    multi_model_mode = bool(args.models_dir or (args.model and len(args.model) > 1))
+    
+    # Parse --model arguments (format: name:path or just path)
+    model_specs = []
+    if args.model:
+        for spec in args.model:
+            if ":" in spec and not spec.startswith(("/", "~", ".")):
+                # Format: name:path
+                name, path = spec.split(":", 1)
+                model_specs.append((name, path))
+            else:
+                # Just a path - use basename as name
+                path = spec
+                name = os.path.basename(os.path.normpath(path))
+                model_specs.append((name, path))
+    
+    # If single model specified as positional arg
+    if args.model and len(args.model) == 1 and not args.models_dir:
+        # Traditional single-model mode
+        multi_model_mode = False
+    
+    if multi_model_mode:
+        print("=" * 60)
+        print("MULTI-MODEL MODE (Ollama-style)")
+        print("=" * 60)
+        
+        # Initialize model manager
+        keep_alive = args.keep_alive or 300  # Default 5 minutes
+        manager = init_model_manager(
+            keep_alive_seconds=keep_alive,
+            max_loaded_models=args.max_loaded_models,
+            max_memory_gb=args.max_memory,
+            use_batching=args.continuous_batching,
+            force_mllm=args.mllm,
+        )
+        
+        # Scan models directory if specified
+        if args.models_dir:
+            found = manager.scan_directory(args.models_dir)
+            print(f"  Models directory: {args.models_dir}")
+            print(f"  Found: {found}")
+        
+        # Register explicit model specs
+        for name, path in model_specs:
+            manager.register_model(name, path)
+            print(f"  Registered: {name} -> {path}")
+        
+        if not manager._registry:
+            print("Error: No models found. Specify --models-dir or --model name:path")
+            sys.exit(1)
+        
+        print(f"  Keep alive: {keep_alive}s")
+        if args.max_memory:
+            print(f"  Max memory: {args.max_memory}GB")
+        print(f"  Max loaded: {args.max_loaded_models}")
+        print(f"  Default model: {manager.default_model}")
+        
+        # Enable multi-model mode in server
+        server._multi_model_enabled = True
+        
+    elif args.model and len(args.model) == 1:
+        # Traditional single-model mode
+        model_path = args.model[0]
+        if ":" in model_path and not model_path.startswith(("/", "~", ".")):
+            _, model_path = model_path.split(":", 1)
+        
+        print(f"Loading model: {model_path}")
+        print(f"Default max tokens: {args.max_tokens}")
+    else:
+        print("Error: Specify a model or use --models-dir for multi-model mode")
+        print()
+        print("Usage:")
+        print("  Single model:  vllm-mlx serve <model_path>")
+        print("  Multi model:   vllm-mlx serve --models-dir ~/models")
+        print("  Explicit:      vllm-mlx serve --model qwen35:~/models/Qwen3.5-35B")
+        sys.exit(1)
 
     # Validate tool calling arguments
     if args.enable_auto_tool_choice and not args.tool_call_parser:
@@ -179,15 +259,24 @@ def serve_command(args):
     else:
         print("Mode: Simple (maximum throughput)")
 
-    # Load model with unified server
-    load_model(
-        args.model,
-        use_batching=args.continuous_batching,
-        scheduler_config=scheduler_config,
-        stream_interval=args.stream_interval if args.continuous_batching else 1,
-        max_tokens=args.max_tokens,
-        force_mllm=args.mllm,
-    )
+    # Load model (single-model mode only)
+    if not multi_model_mode:
+        model_path = args.model[0] if args.model else None
+        if model_path and ":" in model_path and not model_path.startswith(("/", "~", ".")):
+            _, model_path = model_path.split(":", 1)
+        
+        print(f"Loading model: {model_path}")
+        print(f"Default max tokens: {args.max_tokens}")
+        load_model(
+            model_path,
+            use_batching=args.continuous_batching,
+            scheduler_config=scheduler_config,
+            stream_interval=args.stream_interval if args.continuous_batching else 1,
+            max_tokens=args.max_tokens,
+            force_mllm=args.mllm,
+            display_name=args.model_name,
+        )
+    # Multi-model mode: models are loaded on-demand in lifespan
 
     # Start server
     print(f"Starting server at http://{args.host}:{args.port}")
@@ -590,7 +679,46 @@ Examples:
 
     # Serve command
     serve_parser = subparsers.add_parser("serve", help="Start OpenAI-compatible server")
-    serve_parser.add_argument("model", type=str, help="Model to serve")
+    serve_parser.add_argument(
+        "model",
+        type=str,
+        nargs="*",  # Multiple models allowed
+        default=[],
+        help="Model(s) to serve. Format: <path> or <name>:<path>. Multiple allowed.",
+    )
+    serve_parser.add_argument(
+        "--model-name",
+        type=str,
+        default=None,
+        help="[Deprecated] Custom display name for single-model mode",
+    )
+    
+    # Multi-model options (Ollama-style)
+    serve_parser.add_argument(
+        "--models-dir",
+        type=str,
+        default=None,
+        help="Directory to scan for models. Each subdirectory is a model.",
+    )
+    serve_parser.add_argument(
+        "--keep-alive",
+        type=float,
+        default=300,
+        help="Seconds to keep models loaded after last use (default: 300 = 5 min). Set 0 to unload immediately.",
+    )
+    serve_parser.add_argument(
+        "--max-memory",
+        type=float,
+        default=None,
+        help="Maximum memory budget in GB. Models evicted when exceeded.",
+    )
+    serve_parser.add_argument(
+        "--max-loaded-models",
+        type=int,
+        default=10,
+        help="Maximum models to keep loaded (default: 10)",
+    )
+    
     serve_parser.add_argument(
         "--host", type=str, default="0.0.0.0", help="Host to bind"
     )

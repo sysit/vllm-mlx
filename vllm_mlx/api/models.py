@@ -174,6 +174,8 @@ class ChatCompletionRequest(BaseModel):
     video_max_frames: int | None = None
     # Request timeout in seconds (None = use server default)
     timeout: float | None = None
+    # Ollama-style keep_alive: how long to keep model loaded after this request
+    keep_alive: float | None = None  # None = use server default
 
 
 class AssistantMessage(BaseModel):
@@ -237,6 +239,8 @@ class CompletionRequest(BaseModel):
     stop: list[str] | None = None
     # Request timeout in seconds (None = use server default)
     timeout: float | None = None
+    # Ollama-style keep_alive
+    keep_alive: float | None = None
 
 
 class CompletionChoice(BaseModel):
