@@ -826,9 +826,13 @@ class SimpleEngine(BaseEngine):
         specprefill_override = kwargs.pop("specprefill", None)
         specprefill_keep_pct = kwargs.pop("specprefill_keep_pct", None)
 
-        # Read enable_thinking from env (set by runtime_patches, consistent with MLLM path)
-        enable_thinking_env = os.environ.get("VLLM_MLX_ENABLE_THINKING", "true")
-        enable_thinking = enable_thinking_env.lower() in ("true", "1", "yes")
+        # Get enable_thinking from kwargs (API request) first, then fallback to env
+        enable_thinking_api = kwargs.get("enable_thinking")
+        if enable_thinking_api is not None:
+            enable_thinking = enable_thinking_api
+        else:
+            enable_thinking_env = os.environ.get("VLLM_MLX_ENABLE_THINKING", "false")
+            enable_thinking = enable_thinking_env.lower() in ("true", "1", "yes")
 
         # Apply chat template for full prompt
         template_kwargs = {

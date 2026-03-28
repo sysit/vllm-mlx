@@ -627,7 +627,10 @@ class BatchedEngine(BaseEngine):
         template_tools = convert_tools_for_template(tools) if tools else None
 
         # Get enable_thinking from kwargs (API request)
+        # Disable for coder models since it interferes with tool call parsing
         enable_thinking = kwargs.get("enable_thinking", False)
+        if "coder" in self._model_name.lower():
+            enable_thinking = False
 
         # Apply chat template
         prompt = self._apply_chat_template(
@@ -742,7 +745,10 @@ class BatchedEngine(BaseEngine):
         template_tools = convert_tools_for_template(tools) if tools else None
 
         # Get enable_thinking from kwargs (API request)
+        # Disable for coder models since it interferes with tool call parsing
         enable_thinking = kwargs.get("enable_thinking", False)
+        if "coder" in self._model_name.lower():
+            enable_thinking = False
 
         # Apply chat template
         prompt = self._apply_chat_template(

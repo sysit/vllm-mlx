@@ -1447,10 +1447,15 @@ class MLXMultimodalLM:
                 f"  Chat msg {i}: role={cm['role']}, content={content_preview}..."
             )
 
+        # Get enable_thinking from kwargs (API request)
+        enable_thinking = kwargs.pop("enable_thinking", False)
+
         # Build template kwargs for tool definitions (tools already popped above)
         template_extra_kwargs = {}
         if tools:
             template_extra_kwargs["tools"] = tools
+        if enable_thinking:
+            template_extra_kwargs["enable_thinking"] = enable_thinking
 
         try:
             # Use get_chat_template directly since messages are already properly formatted
@@ -1828,10 +1833,15 @@ class MLXMultimodalLM:
             all_images.extend(self._prepare_images(all_image_urls))
         all_images.extend(all_video_frames)
 
+        # Get enable_thinking from kwargs (API request)
+        enable_thinking = kwargs.pop("enable_thinking", False)
+
         # Build template kwargs for tool definitions (tools already popped above)
         template_extra_kwargs = {}
         if tools:
             template_extra_kwargs["tools"] = tools
+        if enable_thinking:
+            template_extra_kwargs["enable_thinking"] = enable_thinking
 
         try:
             formatted_prompt = get_chat_template(

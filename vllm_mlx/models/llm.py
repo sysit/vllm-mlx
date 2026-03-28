@@ -289,11 +289,7 @@ class MLXLanguageModel:
             # Add enable_thinking if supported (transforms PR #44881, vLLM PR #34779)
             # This controls whether the template adds thinking tokens (e.g. aed)
             if enable_thinking:
-                try:
-                    template_kwargs["enable_thinking"] = enable_thinking
-                except TypeError:
-                    # Older tokenizer doesn't support this parameter
-                    pass
+                template_kwargs["enable_thinking"] = enable_thinking
 
             try:
                 prompt = self.tokenizer.apply_chat_template(
