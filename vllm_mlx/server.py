@@ -1404,6 +1404,7 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
         "max_tokens": request.max_tokens or _default_max_tokens,
         "temperature": _resolve_temperature(request.temperature),
         "top_p": _resolve_top_p(request.top_p),
+        "enable_thinking": request.enable_thinking,
     }
 
     # Add multimodal content

@@ -253,6 +253,7 @@ class MLXLanguageModel:
         temperature: float = 0.7,
         top_p: float = 0.9,
         tools: list | None = None,
+        enable_thinking: bool = False,
         **kwargs,
     ) -> GenerationOutput:
         """
@@ -264,6 +265,7 @@ class MLXLanguageModel:
             temperature: Sampling temperature
             top_p: Top-p sampling parameter
             tools: Optional list of tools for function calling
+            enable_thinking: Enable thinking/reasoning mode (for Qwen3, etc.)
             **kwargs: Additional generation parameters
 
         Returns:
@@ -284,14 +286,28 @@ class MLXLanguageModel:
             if tools:
                 template_kwargs["tools"] = tools
 
+            # Add enable_thinking if supported (transforms PR #44881, vLLM PR #34779)
+            # This controls whether the template adds thinking tokens (e.g. aed)
+            if enable_thinking:
+                try:
+                    template_kwargs["enable_thinking"] = enable_thinking
+                except TypeError:
+                    # Older tokenizer doesn't support this parameter
+                    pass
+
             try:
                 prompt = self.tokenizer.apply_chat_template(
                     messages,
                     **template_kwargs,
                 )
-            except TypeError:
-                # Tokenizer doesn't support tools parameter
-                del template_kwargs["tools"]
+            except TypeError as e:
+                # Tokenizer doesn't support some parameter - try without unsupported ones
+                # Remove enable_thinking first if that's the issue
+                if "enable_thinking" in template_kwargs:
+                    del template_kwargs["enable_thinking"]
+                # Remove tools if that's the issue
+                if "tools" in template_kwargs and "tools" in str(e):
+                    del template_kwargs["tools"]
                 prompt = self.tokenizer.apply_chat_template(
                     messages,
                     **template_kwargs,

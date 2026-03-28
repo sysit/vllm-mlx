@@ -335,6 +335,7 @@ class BatchedEngine(BaseEngine):
         messages: list[dict[str, Any]],
         tools: list[dict] | None = None,
         num_images: int = 0,
+        enable_thinking: bool = False,
     ) -> str:
         """Apply chat template to messages.
 
@@ -370,14 +371,18 @@ class BatchedEngine(BaseEngine):
             if tools:
                 template_kwargs["tools"] = tools
 
+            # Add enable_thinking if supported (transformers PR #44881, vLLM PR #34779)
+            if enable_thinking:
+                template_kwargs["enable_thinking"] = enable_thinking
+
             try:
                 return template_applicator.apply_chat_template(
                     messages, **template_kwargs
                 )
             except TypeError as e:
-                # Some templates don't accept 'tools'; retry without them.
+                # Some templates don't accept 'tools' or 'enable_thinking'; retry without extras.
                 logger.debug(f"Chat template TypeError, retrying without extras: {e}")
-                for key in ["tools"]:
+                for key in ["tools", "enable_thinking"]:
                     if key in template_kwargs:
                         del template_kwargs[key]
                 return template_applicator.apply_chat_template(
@@ -621,11 +626,15 @@ class BatchedEngine(BaseEngine):
         # Convert tools for template
         template_tools = convert_tools_for_template(tools) if tools else None
 
+        # Get enable_thinking from kwargs (API request)
+        enable_thinking = kwargs.get("enable_thinking", False)
+
         # Apply chat template
         prompt = self._apply_chat_template(
             messages,
             template_tools,
             num_images=len(all_images),
+            enable_thinking=enable_thinking,
         )
 
         return await self.generate(
@@ -732,11 +741,15 @@ class BatchedEngine(BaseEngine):
         # Convert tools for template
         template_tools = convert_tools_for_template(tools) if tools else None
 
+        # Get enable_thinking from kwargs (API request)
+        enable_thinking = kwargs.get("enable_thinking", False)
+
         # Apply chat template
         prompt = self._apply_chat_template(
             messages,
             template_tools,
             num_images=len(all_images),
+            enable_thinking=enable_thinking,
         )
 
         # Compute prefix boundary for cache

@@ -578,9 +578,11 @@ class SimpleEngine(BaseEngine):
         # For LLM, apply chat template and stream
         tokenizer = self._model.tokenizer
         if hasattr(tokenizer, "apply_chat_template"):
-            # Disable thinking mode for coder models since it interferes
-            # with tool call parsing (tags leak as raw text).
-            enable_thinking = "coder" not in self._model_name.lower()
+            # Get enable_thinking from kwargs (API request) or use default
+            # Disable for coder models since it interferes with tool call parsing
+            enable_thinking = kwargs.get("enable_thinking", False)
+            if "coder" in self._model_name.lower():
+                enable_thinking = False
             template_kwargs = {
                 "tokenize": False,
                 "add_generation_prompt": True,
