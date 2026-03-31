@@ -7,7 +7,6 @@ consecutive same-role messages before chat template application. This prevents
 crashes from Qwen 3.5 and Llama templates that require alternating roles.
 """
 
-import pytest
 
 
 class TestNormalizeMessages:
