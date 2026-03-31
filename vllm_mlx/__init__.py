@@ -71,7 +71,7 @@ def __getattr__(name):
 
     # vLLM integration components (require torch)
     if name == "MLXPlatform":
-        from vllm_mlx.platform import MLXPlatform
+        from vllm_mlx.mlx_platform import MLXPlatform
 
         return MLXPlatform
     if name == "MLXWorker":

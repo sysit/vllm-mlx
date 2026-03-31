@@ -104,8 +104,12 @@ def clean_output_text(text: str) -> str:
 # =============================================================================
 # Model Detection
 # =============================================================================
+# Note: Primary detection logic moved to detector.py for better accuracy.
+# The patterns below are kept as a last-resort fallback.
 
-# Patterns that indicate a multimodal language model (MLLM/VLM)
+from ..detector import is_mllm_model, is_vlm_model  # noqa: F401
+
+# Legacy patterns kept for reference and fallback
 MLLM_PATTERNS = [
     "-VL-",
     "-VL/",
@@ -133,27 +137,6 @@ MLLM_PATTERNS = [
     "deepseek-vl",
     "DeepSeek-VL",  # DeepSeek-VL
 ]
-
-
-def is_mllm_model(model_name: str) -> bool:
-    """
-    Check if model name indicates a multimodal language model.
-
-    Args:
-        model_name: HuggingFace model name or local path
-
-    Returns:
-        True if model is detected as MLLM/VLM
-    """
-    model_lower = model_name.lower()
-    for pattern in MLLM_PATTERNS:
-        if pattern.lower() in model_lower:
-            return True
-    return False
-
-
-# Backwards compatibility alias
-is_vlm_model = is_mllm_model
 
 
 # =============================================================================

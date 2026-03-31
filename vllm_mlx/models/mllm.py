@@ -729,6 +729,16 @@ class MLXMultimodalLM:
             self.model, self.processor = load(self.model_name)
             self.config = load_config(self.model_name)
 
+            # Fix: Ensure processor has chat_template from tokenizer
+            # (mlx-vlm load() may not set it for some models)
+            if (
+                hasattr(self.processor, "tokenizer")
+                and hasattr(self.processor.tokenizer, "chat_template")
+                and self.processor.tokenizer.chat_template
+                and not getattr(self.processor, "chat_template", None)
+            ):
+                self.processor.chat_template = self.processor.tokenizer.chat_template
+
             self._loaded = True
             self._video_native = hasattr(
                 self.model.config, "video_token_id"
@@ -1180,11 +1190,19 @@ class MLXMultimodalLM:
         if use_cache and self._cache_manager and all_sources and not cache_hit:
             if prompt_cache is not None:
                 try:
-                    num_tokens = getattr(result, "prompt_tokens", 0)
-                    self._cache_manager.store_cache(
-                        all_sources, formatted_prompt, prompt_cache, num_tokens
+                    # Get actual token_ids for prefix matching
+                    tokenizer = (
+                        self.processor.tokenizer
+                        if hasattr(self.processor, "tokenizer")
+                        else self.processor
                     )
-                    logger.info(f"MLLM cache stored for {len(all_sources)} source(s)")
+                    token_ids = tokenizer.encode(formatted_prompt)
+                    num_tokens = len(token_ids)
+                    
+                    self._cache_manager.store_cache(
+                        all_sources, formatted_prompt, prompt_cache, num_tokens, token_ids
+                    )
+                    logger.info(f"MLLM cache stored for {len(all_sources)} source(s), {num_tokens} tokens")
                 except Exception as e:
                     logger.debug(f"Failed to store MLLM cache: {e}")
 
@@ -2088,40 +2106,9 @@ class MLXMultimodalLM:
 
     @staticmethod
     def is_mllm_model(model_name: str) -> bool:
-        """Check if a model name indicates an MLLM model."""
-        mllm_patterns = [
-            "-VL-",
-            "-VL/",
-            "VL-",
-            "llava",
-            "LLaVA",
-            "idefics",
-            "Idefics",
-            "paligemma",
-            "PaliGemma",
-            "gemma-3",
-            "gemma3",  # Gemma 3 (multimodal)
-            "medgemma",
-            "MedGemma",  # MedGemma (medical multimodal)
-            "pixtral",
-            "Pixtral",
-            "molmo",
-            "Molmo",
-            "phi3-vision",
-            "phi-3-vision",
-            "cogvlm",
-            "CogVLM",
-            "internvl",
-            "InternVL",
-            "minicpm-v",
-            "MiniCPM-V",
-            "florence",
-            "Florence",
-            "deepseek-vl",
-            "DeepSeek-VL",
-        ]
-        model_lower = model_name.lower()
-        return any(pattern.lower() in model_lower for pattern in mllm_patterns)
+        """Check if a model is an MLLM model using config detection."""
+        from ..detector import is_mllm_model as _is_mllm_model
+        return _is_mllm_model(model_name)
 
     def __repr__(self) -> str:
         status = "loaded" if self._loaded else "not loaded"

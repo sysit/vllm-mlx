@@ -176,6 +176,14 @@ class TestIsMllmModel:
         assert is_mllm_model("mlx-community/deepseek-vl-7b-chat-4bit") is True
         assert is_mllm_model("mlx-community/DeepSeek-VL2-small-4bit") is True
 
+    def test_qwen35_moe_vl(self):
+        # Qwen3.5 MoE VL models (have vision_config but no VL in name)
+        assert is_mllm_model("mlx-community/Qwen3.5-122B-A10B-4bit") is True
+        assert is_mllm_model("Qwen3.5-122B-A10B-4bit") is True
+        assert is_mllm_model("mlx-community/Qwen3.5-35B-A10B-8bit") is True
+        # Also match MLX class naming
+        assert is_mllm_model("mlx-community/Qwen3_5Moe-122B-4bit") is True
+
     def test_non_mllm_models(self):
         assert is_mllm_model("mlx-community/Llama-3.2-3B-Instruct-4bit") is False
         assert is_mllm_model("mlx-community/Qwen3-8B-4bit") is False

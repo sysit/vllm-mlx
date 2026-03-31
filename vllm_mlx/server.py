@@ -50,6 +50,17 @@ import uuid
 from collections import defaultdict
 from collections.abc import AsyncIterator
 
+
+class ConfigurationError(Exception):
+    """
+    Configuration validation error.
+
+    Raised when incompatible configuration combinations are detected
+    at startup, preventing runtime failures.
+    """
+
+    pass
+
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
@@ -476,6 +487,62 @@ def load_embedding_model(
     _embedding_engine.load()
 
 
+def _validate_config_compatibility(
+    use_batching: bool,
+    scheduler_config,
+    force_mllm: bool,
+    model_name: str,
+) -> None:
+    """
+    Validate configuration combinations before model loading.
+
+    P0-002: Detect incompatible parameter combinations early:
+    - MLLM + continuous_batching + kv_cache_quantization
+
+    Args:
+        use_batching: Whether continuous batching is enabled
+        scheduler_config: Scheduler configuration (may have kv_cache_quantization)
+        force_mllm: Whether forced MLLM mode is enabled
+        model_name: Model name for auto-detection
+
+    Raises:
+        ConfigurationError: If incompatible combination detected
+    """
+    # Check kv_cache_quantization in scheduler_config
+    kv_cache_quantization = False
+    if scheduler_config is not None:
+        kv_cache_quantization = getattr(
+            scheduler_config, "kv_cache_quantization", False
+        )
+
+    # Detect MLLM from model name or force flag
+    is_mllm = force_mllm or is_mllm_model(model_name)
+
+    # P0-002: MLLM + continuous_batching + kv_cache_quantization is incompatible
+    if is_mllm and use_batching and kv_cache_quantization:
+        raise ConfigurationError(
+            "Incompatible configuration detected:\n"
+            "  - MLLM model (multimodal) enabled\n"
+            "  - Continuous batching (--continuous-batching) enabled\n"
+            "  - KV cache quantization (--kv-cache-quantization) enabled\n"
+            "\n"
+            "MLLM continuous batching requires standard KVCache for vision encoding.\n"
+            "QuantizedKVCache is not compatible with MLLM batch operations.\n"
+            "\n"
+            "Solutions:\n"
+            "  1. Remove --kv-cache-quantization when using MLLM with batching\n"
+            "  2. Use LLM (text-only) model for quantized cache benefits\n"
+            "  3. Disable --continuous-batching for single-user MLLM usage\n"
+        )
+
+    # Log configuration status
+    if is_mllm and use_batching:
+        logger.info(
+            f"[Config Validation] MLLM continuous batching enabled - "
+            f"kv_cache_quantization={kv_cache_quantization}"
+        )
+
+
 def load_model(
     model_name: str,
     use_batching: bool = False,
@@ -509,6 +576,14 @@ def load_model(
         specprefill_draft_model: Path to small draft model for SpecPrefill scoring
     """
     global _engine, _model_name, _model_path, _default_max_tokens, _tool_parser_instance
+
+    # P0-002: Validate configuration before loading
+    _validate_config_compatibility(
+        use_batching=use_batching,
+        scheduler_config=scheduler_config,
+        force_mllm=force_mllm,
+        model_name=model_name,
+    )
 
     _default_max_tokens = max_tokens
     _model_path = model_name

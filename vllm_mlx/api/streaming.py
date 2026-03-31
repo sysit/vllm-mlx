@@ -152,6 +152,7 @@ class StreamingJSONEncoder:
         self,
         role: str | None = None,
         content: str | None = None,
+        reasoning: str | None = None,
         finish_reason: str | None = None,
         usage: dict[str, int] | None = None,
     ) -> str:
@@ -161,6 +162,7 @@ class StreamingJSONEncoder:
         Args:
             role: Assistant role (only for first chunk)
             content: Generated content for this chunk
+            reasoning: Reasoning/thinking content (for models like Qwen3, DeepSeek-R1)
             finish_reason: "stop", "length", or None if not finished
             usage: Optional usage stats
 
@@ -173,6 +175,8 @@ class StreamingJSONEncoder:
             delta_parts.append(f'"role":"{_escape_json_string(role)}"')
         if content is not None:
             delta_parts.append(f'"content":"{_escape_json_string(content)}"')
+        if reasoning is not None:
+            delta_parts.append(f'"reasoning":"{_escape_json_string(reasoning)}"')
 
         delta_json = ",".join(delta_parts)
 

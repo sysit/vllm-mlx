@@ -399,22 +399,31 @@ class MLLMPrefixCacheManager:
         prompt: str,
         cache: list[Any] | None,
         num_tokens: int = 0,
+        token_ids: list[int] | None = None,
     ) -> None:
         """
-        Legacy API: Store KV cache for future reuse.
+        Store KV cache for future reuse.
 
-        For backwards compatibility with existing code.
+        Args:
+            images: List of image paths
+            prompt: Text prompt
+            cache: KV cache to store
+            num_tokens: Number of tokens (fallback if token_ids not provided)
+            token_ids: Actual token IDs for prefix matching (preferred)
         """
         # Don't store empty or None caches
         if cache is None or (isinstance(cache, list) and len(cache) == 0):
             return
+
+        # Use actual token_ids if provided, otherwise fall back to dummy
+        actual_token_ids = token_ids if token_ids else [0] * num_tokens
 
         self.store(
             images=images,
             prompt=prompt,
             vision_embeddings=None,
             kv_cache=cache,
-            token_ids=[0] * num_tokens,  # Dummy token IDs
+            token_ids=actual_token_ids,
             num_image_tokens=0,
         )
 

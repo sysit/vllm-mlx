@@ -286,7 +286,7 @@ class MLLMBatchGenerator:
         sampler: Optional[Callable[[mx.array], mx.array]] = None,
         prefill_batch_size: int = 4,  # Smaller for MLLM due to vision overhead
         completion_batch_size: int = 16,  # Can be larger for text generation
-        prefill_step_size: int = 1024,
+        prefill_step_size: int = 8192,
         enable_vision_cache: bool = True,
         vision_cache_size: int = 100,
     ):
@@ -636,13 +636,27 @@ class MLLMBatchGenerator:
         # Vision encoding cannot be batched because each request may have
         # different images/pixel values. We pass a per-request KVCache to
         # the VLM so the language model writes its KV state directly into it.
+        #
+        # P0-003: Each request creates a FRESH cache to prevent cross-contamination.
+        #         Validate batch dimension == 1 before merge.
         first_tokens = []
         all_logprobs = []
         per_request_caches = []
 
         for req in requests:
             # Create a fresh KVCache for this request's language model prefill
+            # P0-003: Each request gets its own independent cache
             request_cache = make_prompt_cache(self.language_model)
+
+            # P0-003: Validate cache is freshly created (batch_size should be undefined or 1)
+            for layer_idx, layer_cache in enumerate(request_cache):
+                if hasattr(layer_cache, "keys") and layer_cache.keys is not None:
+                    if layer_cache.keys.shape[0] != 1:
+                        logger.warning(
+                            f"[P0-003] Cache layer {layer_idx} has unexpected "
+                            f"batch_size={layer_cache.keys.shape[0]}, expected 1. "
+                            f"Request: {req.request_id}"
+                        )
 
             with mx.stream(MLLMBatchGenerator._stream):
                 # Run VLM forward pass — cache= flows through to language_model
@@ -662,6 +676,28 @@ class MLLMBatchGenerator:
 
             per_request_caches.append(request_cache)
 
+        # P0-003: Validate all caches have batch dimension == 1 before merge
+        for cache_idx, cache in enumerate(per_request_caches):
+            for layer_idx, layer_cache in enumerate(cache):
+                if hasattr(layer_cache, "keys") and layer_cache.keys is not None:
+                    batch_dim = layer_cache.keys.shape[0]
+                    if batch_dim != 1:
+                        raise ValueError(
+                            f"[P0-003] Batch dimension validation failed:\n"
+                            f"  - Request index: {cache_idx}\n"
+                            f"  - Layer index: {layer_idx}\n"
+                            f"  - Expected batch_size: 1\n"
+                            f"  - Actual batch_size: {batch_dim}\n"
+                            f"  - Cache type: {type(layer_cache).__name__}\n"
+                            f"\n"
+                            f"This indicates cache contamination from previous requests.\n"
+                            f"Each MLLM request must use a fresh cache for vision encoding.\n"
+                            f"Possible causes:\n"
+                            f"  1. Cache reuse without proper isolation\n"
+                            f"  2. QuantizedKVCache incompatibility\n"
+                            f"  3. BatchKVCache used for single request\n"
+                        )
+
         # Merge per-request KVCaches into a single BatchKVCache.
         # KVCache.merge() creates a BatchKVCache with proper left-padding
         # alignment, so all requests share a single batched cache for
@@ -671,11 +707,17 @@ class MLLMBatchGenerator:
         sample_cache = per_request_caches[0][0]
         if not isinstance(sample_cache, KVCache):
             raise ValueError(
-                f"MLLM continuous batching requires standard KVCache but got "
-                f"{type(sample_cache).__name__}. Disable --kv-cache-quantization "
-                f"when using multimodal models with --continuous-batching."
+                f"[P0-002] MLLM continuous batching requires standard KVCache but got "
+                f"{type(sample_cache).__name__}. \n"
+                f"\n"
+                f"QuantizedKVCache is not compatible with MLLM batch operations.\n"
+                f"Vision encoding requires standard KVCache for proper merge.\n"
+                f"\n"
+                f"Solution: Disable --kv-cache-quantization when using multimodal "
+                f"models with --continuous-batching."
             )
 
+        # P0-003: Enhanced merge with detailed diagnostics
         try:
             batch_cache = [
                 per_request_caches[0][layer_idx].merge(
@@ -684,10 +726,41 @@ class MLLMBatchGenerator:
                 for layer_idx in range(len(per_request_caches[0]))
             ]
         except Exception as e:
-            logger.error(
-                f"Failed to merge per-request KV caches: {type(e).__name__}: {e}"
+            # P0-003: Provide detailed diagnostics for merge failure
+            error_msg = (
+                f"[P0-003] Failed to merge per-request KV caches:\n"
+                f"  - Error type: {type(e).__name__}\n"
+                f"  - Error message: {e}\n"
+                f"  - Number of requests: {len(requests)}\n"
+                f"  - Number of cache layers: {len(per_request_caches[0])}\n"
+                f"\n"
+                f"Cache structure analysis:\n"
             )
-            raise
+
+            for cache_idx, cache in enumerate(per_request_caches[:3]):  # First 3
+                error_msg += f"  Request {cache_idx}:\n"
+                for layer_idx, layer_cache in enumerate(cache[:3]):  # First 3 layers
+                    cache_type = type(layer_cache).__name__
+                    if hasattr(layer_cache, "keys") and layer_cache.keys is not None:
+                        keys_shape = layer_cache.keys.shape
+                        values_shape = layer_cache.values.shape if hasattr(layer_cache, "values") else "N/A"
+                        error_msg += f"    Layer {layer_idx}: {cache_type}, keys={keys_shape}, values={values_shape}\n"
+                    else:
+                        error_msg += f"    Layer {layer_idx}: {cache_type}, no keys/values\n"
+
+            error_msg += (
+                f"\n"
+                f"Possible causes:\n"
+                f"  1. Mixed cache types (KVCache + QuantizedKVCache)\n"
+                f"  2. Incompatible cache shapes across requests\n"
+                f"  3. Vision encoding produced irregular cache structure\n"
+                f"\n"
+                f"Solution: Ensure all requests use standard KVCache "
+                f"(disable --kv-cache-quantization)."
+            )
+
+            logger.error(error_msg)
+            raise ValueError(error_msg) from e
 
         # Create initial y (first generated tokens)
         y = mx.array(first_tokens)
