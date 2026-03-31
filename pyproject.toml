@@ -29,7 +29,7 @@ classifiers = [
 
 dependencies = [
     "mlx>=0.31.1",
-    "mlx-lm>=0.31.1",
+    "mlx-lm>=0.31.1",  # 0.31+ required for ArraysCache native batching (hybrid models)
     "mlx-vlm>=0.4.1",  # VLM support
     "transformers>=5.4.0",
     "tokenizers>=0.22.2",
