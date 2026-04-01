@@ -2,6 +2,12 @@
 """
 Reasoning parser for GPT-OSS models using Harmony format.
 
+CHANNEL-BASED PARSER (standalone implementation).
+
+This parser uses a channel-based format instead of thinking tags.
+It inherits directly from ReasoningParser (abstract base) and handles
+its own streaming state tracking.
+
 Harmony uses channels for reasoning vs final content:
 
     <|channel|>analysis
@@ -13,6 +19,10 @@ Harmony uses channels for reasoning vs final content:
 
 The analysis channel contains reasoning, and the final channel
 contains the user-facing response.
+
+See also:
+- vllm_mlx/reasoning/__init__.py for parser architecture overview
+- vllm_mlx/reasoning/base.py for abstract base class
 """
 
 import re

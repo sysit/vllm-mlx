@@ -1,22 +1,27 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Reasoning parser for Qwen3 models.
+Unified reasoning parser for Qwen3 and Qwen3.5 models.
 
-Qwen3 uses <think>...</think> tags for reasoning content and supports
-a strict switch via 'enable_thinking=False' in chat template kwargs.
-
-Supports implicit reasoning mode where <think> is injected in the prompt
+Qwen3 and Qwen3.5 use <think>...</think> tags for reasoning content.
+They support implicit reasoning mode where <think> is injected in the prompt
 by AI agents (e.g., OpenCode) and only </think> appears in the output.
+
+This parser is a thin wrapper around BaseThinkingReasoningParser that defines
+the specific tokens used by Qwen3/Qwen3.5 models.
+
+Note: Both Qwen3 and Qwen3.5 use identical markers, so they share the same
+parser implementation. Use the registry aliases ("qwen3", "qwen3.5", "qwen35")
+to get this parser.
 """
 
 from .think_parser import BaseThinkingReasoningParser
 
 
-class Qwen3ReasoningParser(BaseThinkingReasoningParser):
+class QwenThinkParser(BaseThinkingReasoningParser):
     """
-    Reasoning parser for Qwen3 models.
+    Unified reasoning parser for Qwen3 and Qwen3.5 models.
 
-    Qwen3 uses <think>...</think> tokens to denote reasoning text.
+    Qwen3/Qwen3.5 use <think>...</think> tokens to denote reasoning text.
 
     Supports three scenarios:
     1. Both tags in output: <think>reasoning</think>content
@@ -34,10 +39,12 @@ class Qwen3ReasoningParser(BaseThinkingReasoningParser):
 
     @property
     def start_token(self) -> str:
+        """Return the start token for Qwen3/Qwen3.5 reasoning."""
         return "<think>"
 
     @property
     def end_token(self) -> str:
+        """Return the end token for Qwen3/Qwen3.5 reasoning."""
         return "</think>"
 
     def extract_reasoning(
@@ -45,7 +52,7 @@ class Qwen3ReasoningParser(BaseThinkingReasoningParser):
         model_output: str,
     ) -> tuple[str | None, str | None]:
         """
-        Extract reasoning from Qwen3 output.
+        Extract reasoning from Qwen3/Qwen3.5 output.
 
         Handles both explicit <think>...</think> tags and implicit mode
         where <think> was in the prompt (only </think> in output).

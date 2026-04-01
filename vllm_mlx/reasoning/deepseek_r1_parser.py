@@ -2,9 +2,20 @@
 """
 Reasoning parser for DeepSeek-R1 models.
 
+TEXT-BASED PARSER (BaseThinkingReasoningParser family).
+
+This parser uses text-based marker detection, suitable for models where
+reasoning markers are simple, distinct text strings. It inherits from
+BaseThinkingReasoningParser which provides full streaming support without
+token ID awareness.
+
 DeepSeek-R1 uses <think>...</think> tags for reasoning content.
 The model may sometimes start outputting reasoning without the explicit
 <think> tag, so this parser is more lenient than Qwen3.
+
+See also:
+- vllm_mlx/reasoning/__init__.py for parser architecture overview
+- vllm_mlx/reasoning/think_parser.py for base class implementation
 """
 
 from .base import DeltaMessage

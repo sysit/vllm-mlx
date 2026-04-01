@@ -2,14 +2,27 @@
 """
 Reasoning parser for GPT-OSS models using channel-based format.
 
-GPT-OSS models use a channel-based token format instead of <think>...</think> tags:
-    <|channel|>analysis<|message|>[reasoning]<|start|>assistant<|channel|>final<|message|>[content]<|return|>
+CHANNEL-BASED PARSER (standalone implementation).
+
+This parser uses a channel-based format instead of thinking tags.
+It inherits directly from ReasoningParser (abstract base) and provides
+regex-based extraction for complex channel structures.
+
+GPT-OSS models use a channel-based token format:
+
+    <|channel|>analysis<|message|>[reasoning]
+    <|start|>assistant<|channel|>final<|message|>[content]<|return|>
 
 Some models also emit an extended format with a constrain token:
+
     <|channel|>final <|constrain|>JSON<|message|>[content]<|return|>
 
 This parser extracts reasoning from the 'analysis' channel and content from
 the 'final' channel, stripping all structural tokens from API responses.
+
+See also:
+- vllm_mlx/reasoning/__init__.py for parser architecture overview
+- vllm_mlx/reasoning/base.py for abstract base class
 """
 
 import re

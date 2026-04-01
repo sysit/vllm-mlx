@@ -178,6 +178,9 @@ class ChatCompletionRequest(BaseModel):
     specprefill: bool | None = None
     # SpecPrefill: per-request keep percentage (0.0-1.0, None = use server default)
     specprefill_keep_pct: float | None = None
+    # Thinking/reasoning mode (for models like Qwen3)
+    # Default True for Qwen3.5 models (they use  hesitation tags for reasoning)
+    enable_thinking: bool = True
 
 
 class AssistantMessage(BaseModel):

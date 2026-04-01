@@ -2,8 +2,29 @@
 """
 Base classes for reasoning content extraction.
 
-This module provides the abstract base class for reasoning parsers that extract
-thinking/reasoning content from model outputs (e.g., <think>...</think> tags).
+ABSTRACT BASE FOR ALL REASONING PARSERS.
+
+This module provides the abstract base class ReasoningParser and the
+DeltaMessage data class that all reasoning parsers inherit from or use.
+
+Parser Architecture Overview:
+- ReasoningParser (this file) - Abstract base with core interface
+- DeltaMessage (this file) - Streaming delta output container
+
+Two implementation families:
+
+1. TEXT-BASED (BaseThinkingReasoningParser):
+   - Simple text marker detection
+   - Suitable for Qwen3/Qwen3.5, DeepSeek-R1
+   - Located in think_parser.py
+
+2. TOKEN-AWARE (ReasoningOutputParser):
+   - Token ID support for precise detection
+   - Suitable for models with multi-token markers
+   - Located in output_parser.py
+
+See also:
+- vllm_mlx/reasoning/__init__.py for full architecture overview
 """
 
 from abc import ABC, abstractmethod

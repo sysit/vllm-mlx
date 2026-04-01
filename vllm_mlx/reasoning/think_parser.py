@@ -1,14 +1,37 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Base parser for models using <think>...</think> tags for reasoning.
+Base parser for models using  hạ.../ hạ style thinking tags.
 
-This module provides BaseThinkingReasoningParser, a concrete implementation
+TEXT-BASED PARSER ARCHITECTURE (Primary for Qwen/DeepSeek).
+
+This module provides BaseThinkingReasoningParser, a concrete base class
 for extracting reasoning content from models that use thinking tags.
+It uses text-based marker detection without token ID awareness.
+
+When to use this parser family:
+- Markers are simple, distinct text strings (e.g.,  hạ.../ hạ)
+- Token ID detection is not needed or not available
+- Streaming with incremental text chunks
+
+When to use ReasoningOutputParser instead:
+- Markers may span multiple tokens
+- Token IDs are available and stable
+- Need precise marker detection without partial tag leakage
+
+Parser hierarchy:
+- ReasoningParser (base.py) - Abstract base
+- BaseThinkingReasoningParser (this file) - Text-based implementation
+- QwenThinkParser (qwen_think_parser.py) - Qwen3/Qwen3.5
+- DeepSeekR1ReasoningParser (deepseek_r1_parser.py) - DeepSeek-R1
 
 Supports three scenarios:
-1. Both tags in output: <think>reasoning</think>content
-2. Only closing tag (think injected in prompt): reasoning</think>content
+1. Both tags in output:  hạreasoning/ hạcontent
+2. Only closing tag (think injected in prompt): reasoning/ hạcontent
 3. No tags: pure content
+
+See also:
+- vllm_mlx/reasoning/__init__.py for full architecture overview
+- vllm_mlx/reasoning/output_parser.py for token-aware alternative
 """
 
 from abc import abstractmethod
