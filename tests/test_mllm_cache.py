@@ -396,7 +396,7 @@ class TestMLLMCacheManager:
     def test_repr(self, cache_manager):
         """Test string representation."""
         repr_str = repr(cache_manager)
-        assert "MLLMPrefixCacheManager" in repr_str
+        assert "MLLMCache" in repr_str or "MLLMPrefixCacheManager" in repr_str
         assert "entries=0" in repr_str
         assert "memory=" in repr_str
 

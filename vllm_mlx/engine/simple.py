@@ -812,6 +812,7 @@ class SimpleEngine(BaseEngine):
         temperature: float,
         top_p: float,
         tools: list | None = None,
+        thinking_budget: int | None = None,
         **kwargs,
     ) -> AsyncIterator[GenerationOutput]:
         """Text-only generation via mlx_lm TextModel with MTP.
@@ -822,6 +823,15 @@ class SimpleEngine(BaseEngine):
         System prompt KV caching: on the first request, prefills system tokens
         and snapshots backbone KV state. Subsequent requests with the same
         system prompt restore the snapshot and only prefill the suffix tokens.
+
+        Args:
+            messages: Chat messages
+            max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature
+            top_p: Top-p sampling
+            tools: Optional tools for function calling
+            thinking_budget: Maximum thinking tokens before forcing end (optional)
+            **kwargs: Additional parameters
         """
         import hashlib
         import os
@@ -838,6 +848,22 @@ class SimpleEngine(BaseEngine):
         # Read enable_thinking from env (set by runtime_patches, consistent with MLLM path)
         enable_thinking_env = os.environ.get("VLLM_MLX_ENABLE_THINKING", "true")
         enable_thinking = enable_thinking_env.lower() in ("true", "1", "yes")
+
+        # Create thinking budget criteria if specified
+        thinking_budget_criteria = None
+        if thinking_budget and thinking_budget > 0 and enable_thinking:
+            from ..reasoning.thinking_budget import create_thinking_budget_criteria
+
+            thinking_budget_criteria = create_thinking_budget_criteria(
+                tokenizer=self._text_tokenizer,
+                thinking_budget=thinking_budget,
+                model_type=self._model_name.lower() if self._model_name else "qwen3",
+                enable_thinking=enable_thinking,
+            )
+            if thinking_budget_criteria:
+                logger.info(
+                    f"Thinking budget enabled: {thinking_budget} tokens max"
+                )
 
         # Apply chat template for full prompt
         template_kwargs = {
@@ -1089,6 +1115,9 @@ class SimpleEngine(BaseEngine):
                 )
                 if prompt_cache is not None:
                     gen_kwargs["prompt_cache"] = prompt_cache
+                # Add thinking budget logits processor if specified
+                if thinking_budget_criteria is not None:
+                    gen_kwargs["logits_processors"] = [thinking_budget_criteria]
 
                 for resp in mlx_stream_generate(
                     model,

@@ -1423,6 +1423,10 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
     if request.specprefill_keep_pct is not None:
         chat_kwargs["specprefill_keep_pct"] = request.specprefill_keep_pct
 
+    # Thinking budget: limit thinking tokens for models with reasoning
+    if request.thinking_budget is not None:
+        chat_kwargs["thinking_budget"] = request.thinking_budget
+
     # Add tools if provided
     if request.tools:
         chat_kwargs["tools"] = convert_tools_for_template(request.tools)

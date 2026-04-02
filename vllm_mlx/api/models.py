@@ -181,6 +181,11 @@ class ChatCompletionRequest(BaseModel):
     # Thinking/reasoning mode (for models like Qwen3)
     # None = server decides based on model; True/False = force enable/disable
     enable_thinking: bool = False
+    # Maximum thinking tokens before forcing end (for thinking models)
+    # Only effective when enable_thinking=True
+    thinking_budget: int | None = Field(
+        default=None, gt=0, le=10000, description="Maximum thinking tokens before forcing end"
+    )
 
 
 class AssistantMessage(BaseModel):

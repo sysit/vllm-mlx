@@ -169,6 +169,13 @@ def _register_builtin_parsers():
 _register_builtin_parsers()
 
 
+# Import thinking budget functionality
+from .thinking_budget import (
+    ThinkingBudgetCriteria,
+    create_thinking_budget_criteria,
+)
+
+
 __all__ = [
     # Base classes
     "ReasoningParser",
@@ -189,4 +196,7 @@ __all__ = [
     "register_parser",
     "get_parser",
     "list_parsers",
+    # Thinking budget
+    "ThinkingBudgetCriteria",
+    "create_thinking_budget_criteria",
 ]

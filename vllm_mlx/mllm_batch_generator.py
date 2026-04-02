@@ -28,7 +28,7 @@ import mlx.core as mx
 import mlx.nn as nn
 
 from .multimodal_processor import MultimodalProcessor
-from .vision_embedding_cache import VisionEmbeddingCache
+from .cache import VisionCache as VisionEmbeddingCache
 
 logger = logging.getLogger(__name__)
 
