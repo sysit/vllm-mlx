@@ -2,6 +2,7 @@
 """Tests for streaming detokenizer optimization in scheduler."""
 
 import pytest
+from unittest.mock import MagicMock
 from transformers import AutoTokenizer
 from mlx_lm.tokenizer_utils import (
     NaiveStreamingDetokenizer,
@@ -9,16 +10,91 @@ from mlx_lm.tokenizer_utils import (
 )
 
 
+class MockTokenizer:
+    """A simple mock tokenizer for testing without network dependency."""
+    
+    def __init__(self):
+        # Simple vocab for testing: maps tokens to chars/words
+        self._vocab = {
+            0: "",
+            1: "Hello",
+            2: ",",
+            3: " ",
+            4: "how",
+            5: " are",
+            6: " you",
+            7: " doing",
+            8: " today",
+            9: "?",
+            10: "!",
+            11: "I",
+            12: " hope",
+            13: " you're",
+            14: " well",
+            15: "world",
+            16: "test",
+            17: " 你",
+            18: "好",
+            19: " م",
+            20: "ر",
+            21: "ح",
+            22: "ب",
+            23: "ا",
+            24: " 🎉",
+            25: "Hi",
+            26: "Goodbye",
+            27: "Test",
+            28: "message",
+        }
+        self._reverse_vocab = {v: k for k, v in self._vocab.items()}
+        self.clean_up_tokenization_spaces = True
+    
+    def encode(self, text):
+        """Simple mock encoding - finds matching tokens in text."""
+        tokens = []
+        remaining = text
+        # Sort by length to match longer strings first
+        for word in sorted(self._vocab.values(), key=len, reverse=True):
+            if word and word in remaining:
+                idx = self._reverse_vocab.get(word)
+                if idx is not None:
+                    tokens.append(idx)
+                    remaining = remaining.replace(word, "", 1)
+        # If no tokens found, return a default token for testing
+        if not tokens and text:
+            tokens = [1]  # Default to "Hello" token for unknown text
+        return tokens
+    
+    def decode(self, tokens):
+        """Decode tokens to text."""
+        if isinstance(tokens, int):
+            tokens = [tokens]
+        result = ""
+        for t in tokens:
+            if t in self._vocab:
+                result += self._vocab[t]
+        return result
+
+
 class TestStreamingDetokenizer:
     """Test streaming detokenizer correctness."""
 
     @pytest.fixture
-    def qwen_tokenizer(self):
-        """Load Qwen tokenizer."""
+    def mock_tokenizer(self):
+        """Provide a mock tokenizer for fast tests without network."""
+        return MockTokenizer()
+
+    @pytest.fixture
+    def qwen_tokenizer(self, request):
+        """Load Qwen tokenizer (requires --run-slow and network)."""
+        if not request.config.getoption("--run-slow"):
+            # Return mock tokenizer for fast tests
+            return MockTokenizer()
         return AutoTokenizer.from_pretrained("mlx-community/Qwen3-0.6B-8bit")
 
+    @pytest.mark.slow
     def test_naive_streaming_matches_batch(self, qwen_tokenizer):
-        """Verify NaiveStreamingDetokenizer output matches batch decode."""
+        """Verify NaiveStreamingDetokenizer output matches batch decode (requires network)."""
         text = "Hello, how are you doing today? I hope you're well!"
         tokens = qwen_tokenizer.encode(text)
 
@@ -32,6 +108,24 @@ class TestStreamingDetokenizer:
 
         # Batch decode
         batch_result = qwen_tokenizer.decode(tokens)
+
+        assert streaming_result == batch_result, (
+            f"Streaming: {repr(streaming_result)}\n" f"Batch: {repr(batch_result)}"
+        )
+
+    def test_mock_tokenizer_streaming(self, mock_tokenizer):
+        """Test streaming detokenizer with mock tokenizer (no network required)."""
+        # Use simple token sequence
+        tokens = [1, 2, 3, 4]  # "Hello", ",", " ", "how"
+
+        detok = NaiveStreamingDetokenizer(mock_tokenizer)
+        detok.reset()
+        for t in tokens:
+            detok.add_token(t)
+        detok.finalize()
+
+        streaming_result = detok.text
+        batch_result = mock_tokenizer.decode(tokens)
 
         assert streaming_result == batch_result, (
             f"Streaming: {repr(streaming_result)}\n" f"Batch: {repr(batch_result)}"
@@ -114,8 +208,29 @@ class TestSchedulerDetokenizer:
     """Test scheduler's detokenizer integration."""
 
     @pytest.fixture
-    def scheduler_mock(self):
+    def scheduler_mock(self, request):
         """Create a mock scheduler with detokenizer pool."""
+        if not request.config.getoption("--run-slow"):
+            # Use mock tokenizer for fast tests
+            class MockScheduler:
+                def __init__(self):
+                    self.tokenizer = MockTokenizer()
+                    self._detokenizer_pool = {}
+
+                def _get_detokenizer(self, request_id):
+                    if request_id not in self._detokenizer_pool:
+                        detok = NaiveStreamingDetokenizer(self.tokenizer)
+                        detok.reset()
+                        self._detokenizer_pool[request_id] = detok
+                    return self._detokenizer_pool[request_id]
+
+                def _cleanup_detokenizer(self, request_id):
+                    if request_id in self._detokenizer_pool:
+                        del self._detokenizer_pool[request_id]
+
+            return MockScheduler()
+
+        # Load real tokenizer for slow tests (requires network)
         from transformers import AutoTokenizer
 
         class MockScheduler:
@@ -192,8 +307,9 @@ class TestSchedulerDetokenizer:
         assert detok1.text != detok2.text
 
 
+@pytest.mark.slow
 class TestOptimizedDetokenizer:
-    """Test that optimized detokenizer is used when available."""
+    """Test that optimized detokenizer is used when available (requires network)."""
 
     @pytest.fixture
     def tokenizer_wrapper(self):

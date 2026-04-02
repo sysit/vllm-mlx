@@ -131,6 +131,8 @@ class MLLMBatch:
         Args:
             other: Batch to merge into this one
         """
+        from mlx_lm.models.cache import CacheList
+
         self.uids.extend(other.uids)
         self.request_ids.extend(other.request_ids)
         self.y = mx.concatenate([self.y, other.y])
@@ -143,13 +145,19 @@ class MLLMBatch:
         for c, o in zip(self.cache, other.cache):
             if c is not None and o is not None and hasattr(c, "extend"):
                 try:
-                    # Only extend if both caches have valid keys
-                    if (
-                        hasattr(c, "keys")
-                        and c.keys is not None
-                        and hasattr(o, "keys")
-                        and o.keys is not None
-                    ):
+                    # For KVCache: check keys attribute
+                    # For ArraysCache: check cache list
+                    # For CacheList: always extend (it handles sub-caches internally)
+                    can_extend = (
+                        (hasattr(c, "keys") and c.keys is not None
+                         and hasattr(o, "keys") and o.keys is not None)
+                        or
+                        (hasattr(c, "cache") and c.cache is not None
+                         and hasattr(o, "cache") and o.cache is not None)
+                        or
+                        isinstance(c, CacheList)
+                    )
+                    if can_extend:
                         c.extend(o)
                 except Exception as e:
                     logger.warning(f"Failed to extend cache: {e}")
@@ -662,18 +670,21 @@ class MLLMBatchGenerator:
 
             per_request_caches.append(request_cache)
 
-        # Merge per-request KVCaches into a single BatchKVCache.
-        # KVCache.merge() creates a BatchKVCache with proper left-padding
-        # alignment, so all requests share a single batched cache for
-        # subsequent generation steps.
-        from mlx_lm.models.cache import KVCache
+        # Merge per-request caches into a single batched cache.
+        # KVCache, ArraysCache, and CacheList all support merge() for batch processing.
+        # - KVCache.merge() creates BatchKVCache
+        # - ArraysCache.merge() creates batched ArraysCache
+        # - CacheList.merge() recursively merges each sub-cache
+        # All work for continuous batching with different model architectures.
+        from mlx_lm.models.cache import KVCache, ArraysCache, CacheList
 
         sample_cache = per_request_caches[0][0]
-        if not isinstance(sample_cache, KVCache):
+        if not isinstance(sample_cache, (KVCache, ArraysCache, CacheList)):
             raise ValueError(
-                f"MLLM continuous batching requires standard KVCache but got "
-                f"{type(sample_cache).__name__}. Disable --kv-cache-quantization "
-                f"when using multimodal models with --continuous-batching."
+                f"MLLM continuous batching requires a cache type that supports merge() "
+                f"(KVCache, ArraysCache, or CacheList), but got "
+                f"{type(sample_cache).__name__}. This cache type does not support "
+                f"batch merge operations required for continuous batching."
             )
 
         try:

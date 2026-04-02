@@ -3,6 +3,7 @@
 
 import gc
 import pytest
+from unittest.mock import MagicMock, patch
 from vllm_mlx import (
     EngineCore,
     EngineConfig,
@@ -12,15 +13,31 @@ from vllm_mlx import (
     ModelOwnershipError,
 )
 
-# Use a small model for fast tests
+# Use a small model for fast tests (requires --run-slow and network)
 TEST_MODEL = "mlx-community/Qwen3-0.6B-8bit"
 
 
 @pytest.fixture(scope="module")
-def model_and_tokenizer():
+def model_and_tokenizer(request):
     """Load model once for all tests in module."""
+    # Check if we're running slow tests (real model)
+    if not request.config.getoption("--run-slow"):
+        # Return mock objects for fast unit tests
+        from unittest.mock import MagicMock
+        
+        # Create a mock model (needs unique id() for registry tests)
+        model = MagicMock()
+        model.name = "mock_model"
+        
+        # Create a mock tokenizer
+        tokenizer = MagicMock()
+        tokenizer.encode = lambda x: [1, 2, 3]  # Simple mock encoding
+        tokenizer.decode = lambda x: "mock decoded"  # Simple mock decoding
+        
+        return model, tokenizer
+    
+    # Load real model for slow tests (requires network)
     from mlx_lm import load
-
     return load(TEST_MODEL)
 
 
@@ -33,8 +50,9 @@ class TestModelRegistry:
         reg2 = get_registry()
         assert reg1 is reg2
 
+    @pytest.mark.slow
     def test_acquire_and_release(self, model_and_tokenizer):
-        """Test basic acquire and release."""
+        """Test basic acquire and release (requires --run-slow and network)."""
         model, tokenizer = model_and_tokenizer
         registry = get_registry()
 
@@ -51,10 +69,7 @@ class TestModelRegistry:
         # After close(), the engine should no longer own the model
         assert not engine._owns_model
 
-        # Note: is_owned() may still return True if weak ref is still alive,
-        # but the engine's _owns_model flag should be False
-        # The registry will clean up stale entries on next cleanup() call
-
+    @pytest.mark.slow
     def test_force_ownership_transfer(self, model_and_tokenizer):
         """Test that new engine can force ownership from existing one."""
         model, tokenizer = model_and_tokenizer
@@ -79,6 +94,7 @@ class TestModelRegistry:
         # Cleanup
         engine2.close()
 
+    @pytest.mark.slow
     def test_no_force_raises_error(self, model_and_tokenizer):
         """Test that force=False raises error when model is owned."""
         model, tokenizer = model_and_tokenizer
@@ -94,8 +110,9 @@ class TestModelRegistry:
             engine1.close()
 
 
+@pytest.mark.slow
 class TestMultiEngine:
-    """Tests for multi-engine scenarios."""
+    """Tests for multi-engine scenarios (requires --run-slow and network)."""
 
     def test_sequential_engines_with_close(self, model_and_tokenizer):
         """Test creating multiple engines sequentially with explicit close."""
@@ -145,8 +162,9 @@ class TestMultiEngine:
         assert not is_owned
 
 
+@pytest.mark.slow
 class TestCacheRecovery:
-    """Tests for automatic cache error recovery."""
+    """Tests for automatic cache error recovery (requires --run-slow and network)."""
 
     def test_recovery_from_simulated_cache_corruption(self, model_and_tokenizer):
         """Test that scheduler recovers from cache corruption."""
@@ -191,8 +209,9 @@ class TestCacheRecovery:
             engine.close()
 
 
+@pytest.mark.slow
 class TestBenchmarkScenario:
-    """Tests simulating the benchmark script scenario."""
+    """Tests simulating the benchmark script scenario (requires --run-slow and network)."""
 
     def test_benchmark_like_usage(self, model_and_tokenizer):
         """Test usage pattern similar to benchmark_all_models.py."""
