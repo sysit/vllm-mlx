@@ -17,8 +17,11 @@ Architecture:
 """
 
 import logging
+import os
+import re
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import mlx.core as mx
@@ -28,6 +31,144 @@ from .multimodal_processor import MultimodalProcessor
 from .vision_embedding_cache import VisionEmbeddingCache
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Path validation for security
+# =============================================================================
+
+# Blocked schemes for internal service access
+BLOCKED_SCHEMES = {
+    "file",
+    "ftp",
+    "sftp",
+    "ssh",
+    "ldap",
+    "ldaps",
+    "gopher",
+    "dict",
+    "jar",
+    "mailto",
+    "news",
+    "nntp",
+    "irc",
+    "mms",
+    "rtsp",
+    "ws",
+    "wss",
+}
+
+# Internal/private IP patterns
+INTERNAL_IP_PATTERN = re.compile(
+    r"(?:^|\.)"
+    r"(?:"
+    r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"  # 10.0.0.0/8
+    r"127\.\d{1,3}\.\d{1,3}\.\d{1,3}|"  # 127.0.0.0/8 (loopback)
+    r"169\.254\.\d{1,3}\.\d{1,3}|"  # 169.254.0.0/16 (link-local)
+    r"172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|"  # 172.16.0.0/12
+    r"192\.168\.\d{1,3}\.\d{1,3}|"  # 192.168.0.0/16
+    r"0\.0\.0\.0|"  # 0.0.0.0
+    r"localhost|"  # localhost
+    r"\[::\]|"  # IPv6 any
+    r"\[::1\]|"  # IPv6 loopback
+    r"\[fc"  # IPv6 unique local (fc00::/7)
+    r")",
+    re.IGNORECASE,
+)
+
+
+class PathValidationError(ValueError):
+    """Raised when a path fails security validation."""
+
+    pass
+
+
+def validate_media_path(path: str, allow_remote: bool = True) -> str:
+    """
+    Validate a media path for security.
+
+    Checks for:
+    1. Path traversal attempts (../, ..\\, etc.)
+    2. Blocked URL schemes (file://, ftp://, etc.)
+    3. Internal service access (localhost, 127.0.0.1, etc.)
+
+    Args:
+        path: The path to validate (can be local path or URL)
+        allow_remote: Whether to allow remote URLs (http/https)
+
+    Returns:
+        The validated path
+
+    Raises:
+        PathValidationError: If the path fails validation
+    """
+    if not path or not isinstance(path, str):
+        raise PathValidationError("Path must be a non-empty string")
+
+    path_stripped = path.strip()
+
+    # Check for path traversal patterns
+    traversal_patterns = ["../", "..\\", "/..", "\\.."]
+    for pattern in traversal_patterns:
+        if pattern in path_stripped:
+            raise PathValidationError(
+                f"Path traversal detected: '{path}' contains '{pattern}'"
+            )
+
+    # Check for URL schemes
+    scheme_match = re.match(r"^([a-zA-Z][a-zA-Z0-9+.-]*)://", path_stripped)
+    if scheme_match:
+        scheme = scheme_match.group(1).lower()
+
+        # Block dangerous schemes
+        if scheme in BLOCKED_SCHEMES:
+            raise PathValidationError(
+                f"Blocked URL scheme '{scheme}://' in path: '{path}'"
+            )
+
+        # Only allow http/https for remote URLs
+        if scheme not in ("http", "https"):
+            raise PathValidationError(
+                f"Unsupported URL scheme '{scheme}://' in path: '{path}'"
+            )
+
+        if not allow_remote:
+            raise PathValidationError(
+                f"Remote URLs not allowed: '{path}'"
+            )
+
+        # Check for internal IP access in URLs
+        if _is_internal_url(path_stripped):
+            raise PathValidationError(
+                f"Access to internal services blocked: '{path}'"
+            )
+
+        return path_stripped
+
+    # Local path validation
+    # Reject absolute paths that try to escape common boundaries
+    abs_path = os.path.abspath(path_stripped)
+
+    # Check for suspicious patterns
+    if "\x00" in path_stripped:  # Null byte injection
+        raise PathValidationError("Null byte in path")
+
+    return path_stripped
+
+
+def _is_internal_url(url: str) -> bool:
+    """Check if URL points to an internal/private IP address."""
+    # Extract host from URL
+    host_match = re.search(
+        r"https?://([^/:]+|\[[^\]]+\])", url, re.IGNORECASE
+    )
+    if not host_match:
+        return False
+
+    host = host_match.group(1).strip("[]")
+
+    # Check against internal IP patterns
+    return bool(INTERNAL_IP_PATTERN.search(host))
 
 
 @dataclass
@@ -63,6 +204,9 @@ class MLLMBatchRequest:
     vision_encoded: bool = False
     cross_attention_states: Optional[Any] = None  # For models that use cross-attention
     encoder_outputs: Optional[Any] = None  # For encoder-decoder models
+
+    # Error tracking
+    preprocessing_error: Optional[str] = None  # Error message if preprocessing failed
 
 
 @dataclass
@@ -452,6 +596,10 @@ class MLLMBatchGenerator:
 
         Args:
             request: Request to preprocess
+
+        Raises:
+            PathValidationError: If image/video paths fail security validation
+            RuntimeError: If vision encoding fails
         """
         from mlx_vlm.utils import prepare_inputs
 
@@ -465,10 +613,25 @@ class MLLMBatchGenerator:
 
             for img in request.images:
                 try:
-                    path = process_image_input(img)
+                    # Validate path for security
+                    validated_path = validate_media_path(img)
+
+                    # Process the validated input
+                    path = process_image_input(validated_path)
                     all_images.append(path)
+                except PathValidationError as e:
+                    # Security violation - log and propagate
+                    logger.error(
+                        f"Path validation failed for request {request.request_id}: {e}"
+                    )
+                    request.preprocessing_error = str(e)
+                    raise
                 except Exception as e:
-                    logger.warning(f"Failed to process image: {e}")
+                    # Processing error - log and propagate
+                    error_msg = f"Failed to process image '{img}': {type(e).__name__}: {e}"
+                    logger.error(f"Request {request.request_id}: {error_msg}")
+                    request.preprocessing_error = error_msg
+                    raise RuntimeError(error_msg) from e
 
         if request.videos:
             from .models.mllm import (
@@ -481,7 +644,11 @@ class MLLMBatchGenerator:
 
             for video in request.videos:
                 try:
-                    video_path = process_video_input(video)
+                    # Validate path for security
+                    validated_path = validate_media_path(video)
+
+                    # Process the validated input
+                    video_path = process_video_input(validated_path)
                     frames = extract_video_frames_smart(
                         video_path,
                         fps=DEFAULT_FPS,
@@ -489,8 +656,19 @@ class MLLMBatchGenerator:
                     )
                     frame_paths = save_frames_to_temp(frames)
                     all_images.extend(frame_paths)
+                except PathValidationError as e:
+                    # Security violation - log and propagate
+                    logger.error(
+                        f"Path validation failed for request {request.request_id}: {e}"
+                    )
+                    request.preprocessing_error = str(e)
+                    raise
                 except Exception as e:
-                    logger.warning(f"Failed to process video: {e}")
+                    # Processing error - log and propagate
+                    error_msg = f"Failed to process video '{video}': {type(e).__name__}: {e}"
+                    logger.error(f"Request {request.request_id}: {error_msg}")
+                    request.preprocessing_error = error_msg
+                    raise RuntimeError(error_msg) from e
 
         # Check pixel cache first
         cached_pixels = self.vision_cache.get_pixel_cache(all_images, request.prompt)
@@ -576,6 +754,9 @@ class MLLMBatchGenerator:
 
         Returns:
             Logits from the forward pass
+
+        Raises:
+            RuntimeError: If vision encoding fails
         """
         # Build model call kwargs
         kwargs = dict(request.extra_kwargs)
@@ -594,8 +775,17 @@ class MLLMBatchGenerator:
         if input_ids.ndim == 1:
             input_ids = input_ids[None, :]
 
-        output = self.model(input_ids, cache=cache, **kwargs)
-        request.vision_encoded = True
+        try:
+            output = self.model(input_ids, cache=cache, **kwargs)
+            request.vision_encoded = True
+        except Exception as e:
+            error_msg = (
+                f"Vision encoding failed for request {request.request_id}: "
+                f"{type(e).__name__}: {e}"
+            )
+            logger.error(error_msg)
+            request.preprocessing_error = error_msg
+            raise RuntimeError(error_msg) from e
 
         # Handle LanguageModelOutput or plain tensor
         if hasattr(output, "logits"):

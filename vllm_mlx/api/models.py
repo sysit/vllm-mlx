@@ -170,8 +170,8 @@ class ChatCompletionRequest(BaseModel):
     # Structured output
     response_format: ResponseFormat | dict | None = None
     # MLLM-specific parameters
-    video_fps: float | None = None
-    video_max_frames: int | None = None
+    video_fps: float | None = Field(default=None, gt=0, le=120)
+    video_max_frames: int | None = Field(default=None, gt=0, le=1000)
     # Request timeout in seconds (None = use server default)
     timeout: float | None = None
     # SpecPrefill: per-request enable/disable (None = server decides)
@@ -179,8 +179,8 @@ class ChatCompletionRequest(BaseModel):
     # SpecPrefill: per-request keep percentage (0.0-1.0, None = use server default)
     specprefill_keep_pct: float | None = None
     # Thinking/reasoning mode (for models like Qwen3)
-    # Default True for Qwen3.5 models (they use  hesitation tags for reasoning)
-    enable_thinking: bool = True
+    # None = server decides based on model; True/False = force enable/disable
+    enable_thinking: bool = False
 
 
 class AssistantMessage(BaseModel):
