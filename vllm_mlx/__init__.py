@@ -10,6 +10,15 @@ Features:
 - Continuous batching via vLLM-style scheduler
 - OpenAI-compatible API server
 - Support for LLM and multimodal models
+
+New unified cache module (v0.3.0+):
+    from vllm_mlx.cache import (
+        PrefixCache, BlockCache, PagedCache,
+        VisionCache, MLLMCache, MemoryAwarePrefixCache
+    )
+
+Legacy imports still work for backward compatibility:
+    from vllm_mlx import PrefixCacheManager, BlockAwarePrefixCache
 """
 
 __version__ = "0.2.5"
@@ -38,30 +47,37 @@ def __getattr__(name):
 
         return getattr(engine_core, name)
 
-    # Prefix cache
-    if name in ("PrefixCacheManager", "PrefixCacheStats", "BlockAwarePrefixCache"):
-        from vllm_mlx import prefix_cache
-
-        return getattr(prefix_cache, name)
-
-    # Paged cache
-    if name in ("PagedCacheManager", "CacheBlock", "BlockTable", "CacheStats"):
-        from vllm_mlx import paged_cache
-
-        return getattr(paged_cache, name)
-
-    # MLLM cache (with legacy VLM aliases)
+    # New unified cache module exports (v0.3.0+)
+    # All cache classes now live in vllm_mlx.cache module
     if name in (
+        "PrefixCache",
+        "BlockCache",
+        "PagedCache",
+        "VisionCache",
+        "MLLMCache",
+        "CacheConfig",
+        # Legacy names (backward compatibility)
+        "PrefixCacheManager",
+        "PrefixCacheStats",
+        "BlockAwarePrefixCache",
+        "PagedCacheManager",
+        "CacheBlock",
+        "BlockTable",
+        "CacheStats",
         "MLLMCacheManager",
         "MLLMCacheStats",
         "VLMCacheManager",
         "VLMCacheStats",
+        "MemoryAwarePrefixCache",
+        "MemoryCacheConfig",
+        "VisionEmbeddingCache",
     ):
-        from vllm_mlx import mllm_cache
+        from vllm_mlx import cache
 
         # Map legacy VLM names to MLLM
-        mllm_name = name.replace("VLM", "MLLM") if name.startswith("VLM") else name
-        return getattr(mllm_cache, mllm_name)
+        if name.startswith("VLM"):
+            name = name.replace("VLM", "MLLM")
+        return getattr(cache, name)
 
     # Model registry
     if name in ("get_registry", "ModelOwnershipError"):
@@ -112,11 +128,18 @@ __all__ = [
     # Model registry
     "get_registry",
     "ModelOwnershipError",
-    # Prefix cache (LLM)
+    # New unified cache exports (v0.3.0+)
+    "PrefixCache",
+    "BlockCache",
+    "PagedCache",
+    "VisionCache",
+    "MLLMCache",
+    "CacheConfig",
+    # Prefix cache (LLM) - legacy names
     "PrefixCacheManager",
     "PrefixCacheStats",
     "BlockAwarePrefixCache",
-    # Paged cache (memory efficiency)
+    # Paged cache (memory efficiency) - legacy names
     "PagedCacheManager",
     "CacheBlock",
     "BlockTable",

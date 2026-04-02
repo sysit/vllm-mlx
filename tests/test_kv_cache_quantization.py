@@ -4,7 +4,7 @@
 import mlx.core as mx
 from mlx_lm.models.cache import KVCache, QuantizedKVCache
 
-from vllm_mlx.memory_cache import (
+from vllm_mlx.cache import (
     MemoryAwarePrefixCache,
     MemoryCacheConfig,
     _dequantize_cache,

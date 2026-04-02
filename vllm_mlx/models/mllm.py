@@ -28,7 +28,7 @@ from urllib.parse import urlparse
 import numpy as np
 import requests
 
-from vllm_mlx.mllm_cache import MLLMPrefixCacheManager
+from vllm_mlx.cache import MLLMCache, MLLMCacheManager
 
 logger = logging.getLogger(__name__)
 
@@ -711,9 +711,9 @@ class MLXMultimodalLM:
         self._video_native = False
 
         # Initialize MLLM prefix cache manager (with vision embedding caching)
-        self._cache_manager: MLLMPrefixCacheManager | None = None
+        self._cache_manager: MLLMCacheManager | None = None
         if enable_cache:
-            self._cache_manager = MLLMPrefixCacheManager(max_entries=cache_size)
+            self._cache_manager = MLLMCacheManager(max_entries=cache_size)
 
     def load(self) -> None:
         """Load the model and processor."""

@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from vllm_mlx.prefix_cache import (
+from vllm_mlx.cache import (
     CacheEntry,
     PrefixCacheManager,
     PrefixCacheStats,

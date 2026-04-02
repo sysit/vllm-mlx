@@ -150,7 +150,7 @@ Let's begin the session. I'm ready to help with any technical questions you have
 
     # Test WITHOUT paged cache (standard approach)
     print("\n--- Test WITHOUT Paged Cache ---")
-    from vllm_mlx.prefix_cache import PrefixCacheManager
+    from vllm_mlx.cache import PrefixCacheManager
 
     standard_cache = PrefixCacheManager(model=model, max_entries=100)
 
@@ -187,8 +187,8 @@ Let's begin the session. I'm ready to help with any technical questions you have
 
     # Test WITH paged cache
     print("\n--- Test WITH Paged Cache ---")
-    from vllm_mlx.paged_cache import PagedCacheManager
-    from vllm_mlx.prefix_cache import BlockAwarePrefixCache
+    from vllm_mlx.cache import PagedCacheManager
+    from vllm_mlx.cache import BlockAwarePrefixCache
 
     paged_manager = PagedCacheManager(block_size=64, max_blocks=500)
     paged_cache = BlockAwarePrefixCache(model=model, paged_cache_manager=paged_manager)

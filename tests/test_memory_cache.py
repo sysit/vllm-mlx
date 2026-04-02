@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vllm_mlx.memory_cache import (
+from vllm_mlx.cache import (
     CacheStats,
     MemoryAwarePrefixCache,
     MemoryCacheConfig,

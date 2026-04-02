@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from vllm_mlx.mllm_cache import (
+from vllm_mlx.cache import (
     MLLMCacheStats,
     MLLMPrefixCacheEntry,
     MLLMPrefixCacheManager,

@@ -418,7 +418,7 @@ class TestVisionCache:
 
     def test_cache_creation(self):
         """Test VLM cache creation."""
-        from vllm_mlx.mllm_cache import MLLMCacheManager
+        from vllm_mlx.cache import MLLMCacheManager
 
         cache = MLLMCacheManager(max_entries=10)
 
@@ -427,7 +427,7 @@ class TestVisionCache:
 
     def test_cache_miss(self):
         """Test cache miss."""
-        from vllm_mlx.mllm_cache import MLLMCacheManager
+        from vllm_mlx.cache import MLLMCacheManager
 
         cache = MLLMCacheManager()
 
@@ -439,7 +439,7 @@ class TestVisionCache:
 
     def test_cache_store_and_fetch(self):
         """Test storing and fetching from cache."""
-        from vllm_mlx.mllm_cache import MLLMCacheManager
+        from vllm_mlx.cache import MLLMCacheManager
 
         cache = MLLMCacheManager()
 
@@ -457,7 +457,7 @@ class TestVisionCache:
 
     def test_cache_eviction(self):
         """Test cache eviction when full."""
-        from vllm_mlx.mllm_cache import MLLMCacheManager
+        from vllm_mlx.cache import MLLMCacheManager
 
         cache = MLLMCacheManager(max_entries=2)
 
