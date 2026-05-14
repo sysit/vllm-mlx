@@ -53,6 +53,32 @@ def restore_server_globals():
     )
     snapshot = {name: getattr(srv, name, sentinel) for name in global_names}
 
+    # Reset state-holding globals before each test so prior-file pollution
+    # (an engine left alive by test_simple_engine.py, a model name registered
+    # by test_server.py) doesn't leak in.  Config defaults like _default_timeout
+    # stay untouched because they're numbers used in arithmetic.
+    state_reset = {
+        "_engine": None,
+        "_model_name": None,
+        "_model_path": None,
+        "_default_model_key": None,
+        "_force_mllm_model": None,
+        "_residency_manager": None,
+        "_lifecycle_task": None,
+        "_lifespan_active": False,
+        "_mcp_manager": None,
+        "_mcp_executor": None,
+        "_embedding_engine": None,
+        "_embedding_model_locked": False,
+        "_reasoning_parser": None,
+        "_enable_auto_tool_choice": False,
+        "_tool_call_parser": None,
+        "_tool_parser_instance": None,
+        "_idle_unload_enabled": None,
+    }
+    for name, value in state_reset.items():
+        setattr(srv, name, value)
+
     yield
 
     leaked_task = getattr(srv, "_lifecycle_task", None)
@@ -320,7 +346,12 @@ class TestCompletionStreamingRelease:
                 raise RuntimeError("generation failed")
 
         async def fake_acquire(
-            raw_request, *, total_timeout=None, deadline=None, count_activity=True
+            raw_request,
+            *,
+            total_timeout=None,
+            deadline=None,
+            count_activity=True,
+            model=None,
         ):
             acquires["count"] += 1
             return FakeEngine()
@@ -393,7 +424,12 @@ class TestCompletionStreamingRelease:
                 )
 
         async def fake_acquire(
-            raw_request, *, total_timeout=None, deadline=None, count_activity=True
+            raw_request,
+            *,
+            total_timeout=None,
+            deadline=None,
+            count_activity=True,
+            model=None,
         ):
             return FakeEngine()
 
@@ -579,7 +615,12 @@ class TestToolParserUsesLocalEngine:
         local_engine = FakeEngine("tok-local")
 
         async def fake_acquire(
-            raw_request, *, total_timeout=None, deadline=None, count_activity=True
+            raw_request,
+            *,
+            total_timeout=None,
+            deadline=None,
+            count_activity=True,
+            model=None,
         ):
             return local_engine
 
@@ -652,7 +693,12 @@ class TestLifecycleFailureHandling:
             preserve_native_tool_format = False
 
         async def fake_acquire(
-            raw_request, *, total_timeout=None, deadline=None, count_activity=True
+            raw_request,
+            *,
+            total_timeout=None,
+            deadline=None,
+            count_activity=True,
+            model=None,
         ):
             calls["acquires"] += 1
             return FakeEngine()
@@ -681,7 +727,12 @@ class TestLifecycleFailureHandling:
             preserve_native_tool_format = False
 
         async def fake_acquire(
-            raw_request, *, total_timeout=None, deadline=None, count_activity=True
+            raw_request,
+            *,
+            total_timeout=None,
+            deadline=None,
+            count_activity=True,
+            model=None,
         ):
             calls["acquires"] += 1
             return FakeEngine()
@@ -744,8 +795,7 @@ class TestLifecycleFailureHandling:
             preserve_native_tool_format = False
 
         class FakeRequest:
-            async def is_disconnected(self):
-                return True
+            _is_disconnected = True
 
         async def fake_acquire(model_key):
             try:
@@ -2627,7 +2677,8 @@ class TestLifecycleFailureHandling:
                 )
 
         class FakeRequest:
-            async def is_disconnected(self):
+            @property
+            def _is_disconnected(self):
                 disconnect_polled.set()
                 return True
 
@@ -2748,7 +2799,8 @@ class TestLifecycleFailureHandling:
                     "messages": [{"role": "user", "content": "hi"}],
                 }
 
-            async def is_disconnected(self):
+            @property
+            def _is_disconnected(self):
                 disconnect_polled.set()
                 return True
 
@@ -3013,11 +3065,11 @@ class TestLifecycleFailureHandling:
         task_ref = {"task": None}
 
         class FakeRequest:
-            async def is_disconnected(self):
+            @property
+            def _is_disconnected(self):
                 task = task_ref["task"]
                 assert task is not None
                 task.cancel()
-                await asyncio.sleep(0)
                 return True
 
         async def cancellable_work():
@@ -3530,7 +3582,12 @@ class TestResponseModelFieldUsesServedName:
         served_name = "my-custom-served-name"
 
         async def fake_acquire(
-            raw_request, *, total_timeout=None, deadline=None, count_activity=True
+            raw_request,
+            *,
+            total_timeout=None,
+            deadline=None,
+            count_activity=True,
+            model=None,
         ):
             return FakeEngine()
 
@@ -3577,7 +3634,12 @@ class TestResponseModelFieldUsesServedName:
         served_name = "my-custom-served-name"
 
         async def fake_acquire(
-            raw_request, *, total_timeout=None, deadline=None, count_activity=True
+            raw_request,
+            *,
+            total_timeout=None,
+            deadline=None,
+            count_activity=True,
+            model=None,
         ):
             return FakeEngine()
 
@@ -3628,7 +3690,12 @@ class TestResponseModelFieldUsesServedName:
         served_name = "my-custom-served-name"
 
         async def fake_acquire(
-            raw_request, *, total_timeout=None, deadline=None, count_activity=True
+            raw_request,
+            *,
+            total_timeout=None,
+            deadline=None,
+            count_activity=True,
+            model=None,
         ):
             return FakeEngine()
 

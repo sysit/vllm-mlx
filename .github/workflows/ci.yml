@@ -147,6 +147,8 @@ jobs:
             tests/test_batching.py \
             tests/test_continuous_batching.py \
             tests/test_memory_cache_mlx.py \
+            tests/test_lifecycle_cli.py \
+            tests/test_lifecycle_server.py \
             tests/test_normalize_messages.py \
             tests/test_responses_api.py \
             tests/test_thinking_aware_processor.py \
