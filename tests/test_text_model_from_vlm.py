@@ -74,6 +74,10 @@ def test_build_text_model_dispatches_gemma4_text_model(tmp_path, monkeypatch):
         def load_weights(self, weights, strict=False):
             self.loaded_weights.append((weights, strict))
 
+        def train(self, mode=True):
+            self.training = mode
+            return self
+
     gemma_module = types.ModuleType("mlx_lm.models.gemma4_text")
     gemma_module.Model = GemmaModel
     gemma_module.ModelArgs = GemmaModelArgs
